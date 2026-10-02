@@ -1,0 +1,241 @@
+万物工具箱.exe —— 来源、用途与安全性（木马排查）分析报告
+分析对象：c:\Users\jh_JL\Desktop\CKTOOLBOX\万物工具箱.exe
+生成时间：2026-10-02
+分析方式：静态分析（脱壳 + 反汇编 + 字符串/导入表/资源核查），未运行该程序。
+
+======================================================================
+一、结论摘要（先说结果）
+======================================================================
+1) 该 EXE 本身【未发现木马/后门/盗号/远控代码】，未发现以下任一典型恶意特征：
+   - 无自启动/持久化注册表项（无 ...\CurrentVersion\Run / RunOnce / Services 等）
+   - 无下载并执行（未导入 URLDownloadToFile / InternetOpen / InternetReadFile / WinHttp 等）
+   - 无键盘记录（未导入 GetAsyncKeyState / GetKeyboardState）
+   - 无进程注入（未导入 CreateRemoteThread / WriteProcessMemory / SetThreadContext）
+   - 无内嵌可执行体（全文件严格扫描 MZ+PE，只命中自身 PE 头，无第二个 PE）
+   - 无外壳之外的二次加密载荷（高熵区经核实为 PNG/JPEG 图片与 zlib 压缩数据）
+2) 程序确实会【读注册表】，但只有 3 条、且全部是“读取”用于识别 Windows 版本（兼容性判断），
+   不是修改注册表，也没有把自身写进开机启动项。
+3) 唯一需要提醒的风险不在 EXE 本身，而在于它“携带/启动的一批第三方工具”
+   （含系统级、磁盘级、激活类、远程控制类工具）+ 程序要求管理员权限。
+4) 第二轮做了 IAT 交叉引用（找出函数的真实调用点）复核：
+   - 注册表读取调用点成立且为只读；注册表“写入”调用点只存在于静态链接进来的
+     MFC/易语言运行库通用助手（子键硬编码 "software"），程序本身没有可写入的路径常量。
+   - 两处 SetWindowsHookExA 均为线程级 WH_CBT(=5) UI 钩子，非键盘记录。
+   - 唯一需要留意的第三方组件是 硬件检测引擎.dll（图吧工具箱/曙光工作室，ASPack 加壳、无签名），
+     详见第十一节。
+
+======================================================================
+二、文件与被分析信息
+======================================================================
+文件名      ：万物工具箱.exe
+大小        ：2,408,448 字节（原始）；脱壳后 3,485,696 字节
+文件版本    ：6.9.26.930
+产品名称    ：万物工具箱（中元节版）
+公司/作者   ：万物永存技术工作室
+版权        ：版权所有 (C) 2021-2026 万物永存技术工作室 保留所有权利
+备注(版本信息)：本程序使用易语言编写(http://www.eyuyan.com)
+开发语言    ：易语言（EPL），32 位 GUI 程序
+编译方式    ：易语言“静态编译”（运行库 krnln 已静态链接进 EXE）
+加壳        ：UPX 5.00（已成功脱壳，脱壳文件见第八节）
+清单(Manifest)：E.App，requestedExecutionLevel = requireAdministrator（要求管理员权限）
+界面库      ：EXUI++ 界面库 20260529（ExuiKrnln）
+支持库      ：系统核心支持库(krnln)、应用接口支持库(eAPI)、特殊功能支持库(spec)、硬件检测引擎.dll
+
+说明：因为“版本信息备注”写明“本程序使用易语言编写”，所以这是国产易语言编写，
+      不是伪装成易语言的可疑程序。
+
+======================================================================
+三、程序来源
+======================================================================
+- GitHub 仓库（程序内常量中出现，用于检查更新/反馈）：
+    https://github.com/ELFTS/wwgjx/releases/latest      （wwgjx = 万物工具箱，作者 ELFTS）
+    https://github.com/ELFTS/wwgjx/issues
+- 作者在程序内公开的交流群（用于确认来源与官方渠道）：
+    技术群：957042500
+    游戏厅：128303360
+    杨文韬的万物村分群：915112568
+    无线通讯群：851437489
+    杨文韬的动植物爱好群：857167793
+- 本地配套文件（同目录，属该工具箱的正常组成部分）：
+    万物工具箱.exe、硬件检测引擎.dll、hwinfo.ini、工具箱配置（请勿删除，留着可以自己改哦）.ini、
+    Assets\（图标/背景/音效/主题皮肤）、Tools\（工具集）、GameTools\（游戏工具）、
+    更新日志\（index.html 等，本地帮助文档）、ExuiKrnln_Win32.lib、PnPDevice.ini
+结论：来源明确、为个人/工作室发布的“工具箱”类软件，非无来源的可疑样本。
+
+======================================================================
+四、程序用途（它到底是干什么的）
+======================================================================
+一句话：一个“软件/工具集合启动器（Launcher）”——用 ExUI 做的皮肤界面，
+        把大量第三方小工具按分类列成按钮，点击后启动对应的外部程序。
+
+从常量表还原出的完整工具清单（程序自身不包含这些工具，只是按路径启动）：
+  【系统工具】27 个：AIDA64-Vista、WinNTSetup(Vista/普通)、HEU KMS Activator、noMeiryoUI、
+      BlueScreenView、BOOTICE、ContextMenuManager、Dism++、NSudo、Rufus(Win7/Vista/普通)、
+      WimTool、Ventoy2Disk、VentoyPlugson、软媒美化大师、MyComputerManager、DirectXRepair、
+      Windows Update Blocker、SysRi、Windows系统调校、软媒设置大师、软媒电脑医生、
+      CustomizerGod、ProcessExplorer
+  【硬件工具】14 个：AIDA64、CPU-Z、GPU-Z、360驱动大师、DriverEasy、傲梅分区助手、CrystalDiskInfo、
+      CrystalDiskMark、DiskGenius、HardDiskSentinel、Display Driver Uninstaller(DDU)、
+      CrystalMarkRetro、HWMonitor
+  【实用工具】13 个：ResourceHacker、exeinfope、PowerISO、360断网急救箱、360宽带测速器、
+      UninstallTool、软媒虚拟光驱、单文件制作、Smart Defrag、鼠标连点器、PaperTodo、
+      悬浮桌面小时钟、viap.exe
+  【文件工具】11 个：WizTree、ReNamer、Everything、DupFilesSearchAndLink、chkHash、
+      360文件粉碎机、IObitUnlocker、LocalSend(Win7/普通)、SpaceSniffer、FastCopy
+  【系统优化】7 个：WinTools.net、WiseRegistryCleaner、金山垃圾清理、软媒清理大师(新旧版)、
+      LightC、ZyperWin++
+  【媒体工具】5 个：ScreenToGif、oCam、krc转lrc、Mp3tag、FFmpegFreeUI
+  【远程控制】4 个：AnyDesk、RayLink_Lite、RustDesk(Win7/普通)
+  【GameTools】3 个：NBTExplorer (Fixed)、MCSkin3D、PvZ Toolkit
+其他界面功能：多主题换肤（红/绿/橘/粉 .WSkin）、启动音效（小米/三星/一加/Mint 等）、
+      节假日背景（中秋/端午/新年/中元节…）、硬件信息页（调用 硬件检测引擎.dll）、
+      “一言”随机语句、更新检查、爆炸/掉落小彩蛋。
+
+======================================================================
+五、注册表操作说明（重点：不是“修改注册表”）
+======================================================================
+程序导入的注册表相关 API（来自静态链接的易语言运行库，属常规导入）：
+    RegOpenKeyExA、RegQueryValueExA、RegQueryValueA、RegCloseKey  —— 读取
+    RegCreateKeyExA、RegSetValueExA                              —— 导入但未发现调用所需的路径常量
+程序中出现的注册表路径常量只有 3 条，且都是【读取】：
+    1) SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProductName   （判断是 Win10/11/Server 等）
+    2) SOFTWARE\Microsoft\Windows NT\CurrentVersion\CSDVersion    （判断 SP/补丁版本）
+    3) SOFTWARE\Microsoft\Windows NT\CurrentVersion\CurrentBuild  （判断系统 Build 号）
+用途：用于“系统兼容性判断”，对应界面提示语：
+    “您当前的系统版本不兼容这个工具哦！”、“32位系统不兼容这个工具哦！”（含 “获取失败，请检查版本:”）
+未发现：开机自启项、服务注册、Shell 扩展注册、解除/修改系统安全设置等写入注册表的路径常量。
+
+【配置写在哪里】——不在注册表，而是在程序自己目录下的 INI：
+    工具箱配置（请勿删除，留着可以自己改哦）.ini   ← 主题/音效/背景/开关等（读写）
+    hwinfo.ini                                     ← 硬件检测结果缓存（写）
+    （写 INI 用的是 WritePrivateProfileStringA / GetPrivateProfileStringA，属正常配置读写）
+
+注意：由于易语言“静态编译”会直接把运行库里的 RegSetValueExA 等带进导入表，
+      因此“导入表里出现写注册表函数”≠“程序真的写注册表”。
+      本次静态分析未找到任何用于写入的注册表路径，故判定为只读。
+
+======================================================================
+六、网络行为
+======================================================================
+程序内出现的全部网址（均为“打开浏览器/检查更新/取一言”，无 C2、无回传）：
+    更新检查：https://github.com/ELFTS/wwgjx/releases/latest
+    问题反馈：https://github.com/ELFTS/wwgjx/issues
+    一言 API ：https://v1.hitokoto.cn/?encode=text&charset=gbk   （取随机句子显示）
+    打开网站：huorong.cn、potplayer.tv、catsxp.com、423down.com、bandisoft.com/honeyview、
+              pixpin.cn、youxiao.cn、mefcl.com、ghxi.com、acfun.cn 等
+    其余 http://www.w3.org/2000/svg 等是界面库内嵌 SVG 图标的命名空间，不是网络请求。
+连通性检测：调用 wininet 的 InternetGetConnectedStateExA；失败时提示“无法连接网络，请检查网络设置。”
+未导入任何下载/上传/远控 API（URLDownloadToFile、InternetOpen、InternetReadFile、WinHttp、
+    socket/connect/send、gethostbyname 均不存在）。
+
+======================================================================
+七、进程与文件行为
+======================================================================
+- 启动工具：ShellExecuteA / CreateProcessA / WinExec（用于把 Tools\、GameTools\ 下的 exe 拉起来）
+- 读取硬件信息：调用同目录 硬件检测引擎.dll（把结果写到 hwinfo.ini）
+- 单实例控制：CreateMutexA
+- 本地文档：可打开 更新日志\index.html（file:/// 本地文件）
+- 剪贴板：用于“使用鼠标右键可以复制群号~”等功能
+- 托盘：Shell_NotifyIconA
+以上均与“工具箱启动器”的定位相符，未见异常的文件落地/隐藏/自删除行为。
+
+======================================================================
+八、木马排查逐项对照表
+======================================================================
+排查项                          | 结果
+自启动/持久化（Run/RunOnce/服务）| 未发现
+下载并执行（Downloader/Dropper） | 未发现（无相关 API，无内嵌 PE）
+进程注入 / 线程注入              | 未发现（无 CreateRemoteThread 等）
+键盘记录 / 屏幕窃取              | 未发现（无 GetAsyncKeyState；无截屏上传逻辑）
+远控 / 反弹 Shell                | 未发现（内嵌的远控只是被启动的第三方 exe，不是本程序自带）
+勒索 / 批量加密文件              | 未发现
+隐藏窗口 / 无界面后台驻留         | 未发现（正常 GUI 主窗口）
+内嵌第二可执行体                 | 未发现（严格 MZ+PE 扫描仅命中自身）
+窃取浏览器/账号数据              | 未发现（无相关路径常量与 API 调用）
+
+补充说明（容易被误报的点）：
+- 程序被 UPX 加壳 + 易语言静态编译 → 杀软“启发式/静态特征”极易误报为病毒，这是常见误报源。
+- 导入表里含 SetWindowsHookExA / TerminateProcess / WinExec / 写注册表函数等，
+  这些多来自易语言静态运行库，属“能力”，不等于“实际恶意调用”。
+- 程序自带并会启动“HEU KMS 激活工具、NSudo 提权工具、360 系列、磁盘/引导工具、远控客户端”等，
+  这些第三方工具本身会被杀软报“风险工具/HackTool”，但它们不是本 EXE 带的木马。
+
+======================================================================
+九、风险提示（不是木马，但请知悉）
+======================================================================
+1) 需要管理员权限运行（Manifest: requireAdministrator），配合上述系统级工具，误操作可能影响系统。
+2) 携带的第三方工具含：系统激活/破解类、系统与磁盘底层工具、远程控制软件。
+   请确认你信任这些工具的来源；本报告只针对“万物工具箱.exe”本身。
+3) 更新检查会访问 GitHub，一言会访问 hitokoto.cn；若在受限网络会提示获取失败，属正常。
+4) 本报告为静态分析结论；如需 100% 动态确认，可在沙箱/虚拟机中运行并用 Process Monitor、
+   Regshot（对比注册表前后差异）、Wireshark 抓包进行验证。
+   重点核对：注册表是否仅读、是否只写入自身目录的 INI、是否只从自身目录启动子进程。
+
+======================================================================
+十、本次分析产出的文件（均在 CKTOOLBOX 目录下）
+======================================================================
+- 脱壳后的干净程序：        _re\万物工具箱_unpacked.exe
+- 提取的全部资源(61个)：    _re\out\resources\
+- 程序常量/字符串清单：     _re\out\program_constants.txt、_re\out\all_strings.txt
+- 工具分类清单：            _re\out\tool_catalog.txt
+- 分析脚本(可复核)：        _re\*.py
+- 本报告：                  万物工具箱_来源与安全分析.txt
+（_re 目录为本此分析的工作目录，可整体删除，不影响原程序。）
+
+======================================================================
+十一、第二轮深度核查（IAT 交叉引用 + 依赖组件 + 本地文件）
+======================================================================
+为排除“导入表里有函数、但代码其实没调用”的误判，本轮直接做了 IAT 交叉引用，定位每个
+敏感 API 的真实 call 点，并逐一还原其上下文。
+
+1) 注册表 API：真实调用点与其归属
+   - RegOpenKeyExA / RegQueryValueExA / RegQueryValueA：调用点成立，
+     打开标志为 0x20019（KEY_READ，只读）。用于读取第五节列的 3 条系统版本路径。
+   - RegCreateKeyExA / RegSetValueExA：调用点成立，但全部集中在同一个“通用注册表助手函数”
+     （0x4b4f28 / 0x4b4f42 / 0x4b24f1）。该函数把子键名硬编码为字符串 "software"，
+     配合 HKEY_CURRENT_USER(0x80000001) 使用；它周围的字符串是 MFC 运行库字符串
+     （CObject、CMapStringToPtr、commdlg_ColorOK、commdlg_FileNameOK、.INI、.HLP、
+      H:mm:ss、December、November…）。
+     判定：这是【随静态链接进来的 MFC / 易语言运行库自带的通用实现】。
+     程序自身不存在任何用于“写入”的注册表路径常量，因此不会用它写开机启动项。
+   - 全文件重扫（ASCII + GBK + UTF-16 三种编码）：不存在 Run / RunOnce / Services /
+     AppInit_DLLs / Winlogon / Shell\Open / schtasks / bcdedit / netsh / hosts 等
+     任何持久化或系统篡改相关字符串。
+
+2) SetWindowsHookExA：真实调用点（2 处）
+   两处都是：先 call GetCurrentThreadId 取当前线程 ID 作为 dwThreadId，hMod=0，
+   idHook=5（WH_CBT）。这是【线程级 UI 钩子】，皮肤库/窗口子类化常用；
+   且程序未导入 GetAsyncKeyState / GetKeyboardState，不构成键盘记录行为。
+
+3) ShellExecuteA：调用点 push 的操作串正是字符串 "open"（VA 0x707d00），
+   即“用系统默认程序打开文件/链接”，无隐藏参数。
+   CreateProcessA / WinExec 调用点均为“启动外部程序”，与工具箱定位一致。
+
+4) 依赖组件：硬件检测引擎.dll（与 EXE 同目录，程序运行时会调用它）
+   - 文件描述：图吧工具箱硬件检测引擎；公司：曙光工作室；版本 1.0.0.0；
+     导出函数：Hwinfo、Hwinfo_C、dllversion。属于【第三方】组件（图吧工具箱），
+     并非本程序作者编写。
+   - 该 DLL 被 ASPack 加壳（存在 .aspack 段、.text 熵 8.00、导入表仅剩极少桩函数、
+     真实 API 运行时动态解析），并且【没有有效的数字签名】（其“安全目录”指向的不是
+     Authenticode 签名，而是区段数据）。
+   - 影响：加壳后无法用静态方法完全确认其内部行为。
+   - 背景：它是有公开来源的“图吧工具箱·硬件检测引擎”，本程序仅用它读取硬件信息，
+     并把结果写入同目录 hwinfo.ini（本次核查到的 hwinfo.ini 内容为 CPU/主板/系统等常规信息）。
+   - 建议：如对第三方 DLL 不放心，可在沙箱/虚拟机中单独观察其行为，或改用其它硬件信息工具。
+
+5) 本地配套文件核查
+   - 更新日志\index.html、app.js、data.js：普通更新日志页面；仅外链 cdnjs 的
+     font-awesome 样式表和网易云音乐播放器 iframe（music.163.com/outchain/player），
+     未发现 eval / atob / 动态脚本注入 / 隐藏跳转等可疑脚本。
+   - 更新日志\debug.log：仅为“事件跟踪 Provider 注册失败”的日志文本，无敏感内容。
+   - 工具箱配置（请勿删除…）.ini、hwinfo.ini：程序自身目录下的配置与硬件缓存（正常读写）。
+
+6) 二轮结论（结论不变，且证据更确凿）
+   主程序 万物工具箱.exe 未发现木马 / 后门 / 持久化 / 键盘记录 / 进程注入 / 下载执行代码；
+   注册表仅用于“读取系统版本”，配置写在自身目录的 INI。
+   需要留意的只有两点：① 它携带并会启动大量第三方工具（含激活、提权、系统底层、远控）；
+   ② 第三方组件 硬件检测引擎.dll 为加壳且无签名（属图吧工具箱的公开组件）。
+
+======================================================================
+                                                                  报告结束
+======================================================================
